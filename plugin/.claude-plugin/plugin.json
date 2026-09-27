@@ -1,0 +1,13 @@
+{
+  "name": "br8n",
+  "description": "Semantic search over your personal knowledge base — notes, papers, clippings, and past sessions — with automatic context injection.",
+  "version": "{{VERSION}}",
+  "mcpServers": {
+    "br8n": {
+      "command": "{{BR8N_BIN}}",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}

@@ -1,0 +1,24 @@
+# Query -> the document uri that should appear in the top 5.
+# Grow this as retrieval misses things; it is the only objective signal
+# for whether a change to chunking or fusion helped or hurt.
+#
+# Three shapes of case:
+#
+#   expect     = "file:///notes/a.md"                 one acceptable answer
+#   expect_any = ["file:///a.md", "file:///b.md"]     several; ANY one is a hit
+#   expect_none = true                                nothing should answer this
+#
+# `expect_any` exists because scoring against a single document counted every
+# other genuinely correct answer as a miss, so recall read lower than the
+# retriever performed. `expect_none` cases are excluded from recall and are the
+# only class that can calibrate the `[hook] threshold`: without them
+# "irrelevant" means every non-target hit, most of which are still on topic in a
+# cross-linked vault, so the classes overlap by construction and no separator
+# can ever be measured.
+[[case]]
+query = "why did the connection pooler drop sessions"
+expect = "file:///notes/postgres.md"
+
+[[case]]
+query = "what did I decide about sourdough fermentation"
+expect = "file:///notes/baking.md"

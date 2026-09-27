@@ -1,0 +1,11 @@
+{
+  "name": "br8n-dashboard-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node run.mjs"
+  },
+  "devDependencies": {
+    "puppeteer": "^24.22.0"
+  }
+}

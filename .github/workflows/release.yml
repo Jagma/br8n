@@ -1,0 +1,280 @@
+name: release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and smoke-test every target; publish nothing"
+        type: boolean
+        default: true
+
+# A version bump merged to main IS the release. The gate reads the version
+# from Cargo.toml and publishes v<version> unless that release exists. There
+# is no tag trigger: the publish job creates the tag at the commit it built.
+# (v0.2.0 sat unreleased for a week because the tag was a separate, manual
+# step nobody took, and every fresh `make install` in that week was inert.)
+
+# The default GITHUB_TOKEN is read-only. The build jobs run third-party build
+# scripts (`cargo build` executes crates' build.rs) and must not hold a token
+# that can create a release; only the publish job creates the release and
+# uploads assets, so only it is granted contents:write below. Without that
+# write permission, all builds succeeded and every upload failed with "403
+# Resource not accessible by integration".
+permissions:
+  contents: read
+
+# Two pushes in quick succession run one after the other, never side by side;
+# the second sees the release exists and stops at the gate.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.gate.outputs.version }}
+      publish: ${{ steps.gate.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          V="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          if [ -z "$V" ]; then
+            echo "::error::no version in Cargo.toml"
+            exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+          if gh release view "v$V" --repo "$GITHUB_REPOSITORY" >/dev/null 2>gh.err; then
+            echo "::notice::v$V is already released; nothing to publish"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          elif ! grep -q "release not found" gh.err; then
+            # Any other failure — auth, rate limit, outage — must not be read
+            # as "not released": action-gh-release updates an existing
+            # release's assets, while its tag would keep the old commit.
+            echo "::error::cannot tell whether v$V is released: $(cat gh.err)"
+            exit 1
+          else
+            # --exit-code returns 2 for no match and 128 for a failure; reading
+            # a failure as "no tag" would let a release attach to a tag that
+            # points at an older commit. Probed only once we know no release
+            # exists, so the common no-op push never depends on this call.
+            set +e
+            git ls-remote --exit-code --tags origin "refs/tags/v$V" >/dev/null 2>ls.err
+            tag_rc=$?
+            set -e
+            case "$tag_rc" in
+              2) echo "publish=true" >> "$GITHUB_OUTPUT" ;;
+              0) echo "::error::tag v$V exists but has no release; delete the tag or bump the version"; exit 1 ;;
+              *) echo "::error::cannot list tags: $(cat ls.err)"; exit 1 ;;
+            esac
+          fi
+
+  build:
+    needs: version
+    # A dry run always builds and smoke-tests, even when nothing would be
+    # published, so a workflow change can be proven between releases.
+    if: needs.version.outputs.publish == 'true' || inputs.dry_run == true
+    strategy:
+      # One target's failure must not cancel the others: fail-fast hid the
+      # real error twice (the Linux segfault cancelled macOS; a macOS toolchain
+      # error then cancelled everything else).
+      fail-fast: false
+      matrix:
+        include:
+          # Linker flags, including each platform's OpenSSL -L, live in the
+          # committed .cargo/config.toml, keyed by target triple. No RUSTFLAGS
+          # here: an env var replaces that file wholesale, and a previous
+          # version of this workflow exported the macOS export-dynamic spelling
+          # on every runner — GNU ld parses `-export_dynamic` as
+          # `-e xport_dynamic` (entry point = nonexistent symbol), so every
+          # Linux build script segfaulted.
+          #
+          # macos-15, not 14: lbug's C++ shim needs a newer libc++ — Xcode
+          # 15.4's fails on a pointer_traits template under -std=c++2a.
+          - { os: macos-15,         target: aarch64-apple-darwin }
+          # No x86_64-apple-darwin: lbug's prebuilt Intel static library
+          # references ___cpu_model, a builtins-runtime symbol Apple's linker
+          # cannot resolve — an upstream packaging defect. Intel Mac users
+          # build from source.
+          # 24.04, not 22.04: lbug's header needs C++20 <format> (GCC 13+).
+          # Cost: released Linux binaries require glibc >= 2.39.
+          - { os: ubuntu-24.04,     target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Rerun lbug's build script so its prebuilt library is fetched again
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo clean -p lbug --target "$TARGET"
+      - name: Install OpenSSL dev headers (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+      - name: Link OpenSSL statically (macOS)
+        if: runner.os == 'macOS'
+        # lbug's build script emits `-l ssl -l crypto` with no static/dynamic
+        # preference, and the linker takes libssl.a only when no libssl.dylib
+        # exists anywhere on its search path. The SDK ships no OpenSSL stubs,
+        # so Homebrew's keg is the only place the linker can find either;
+        # removing the dylibs from this throwaway runner is what makes the
+        # released binary run on a Mac that has no Homebrew at all. Assertion
+        # 2 of scripts/release-smoke.sh is the guard.
+        run: |
+          set -eu
+          lib="$(brew --prefix openssl@3)/lib"
+          test -f "$lib/libssl.a" && test -f "$lib/libcrypto.a" || {
+            echo "::error::no static OpenSSL archives in $lib"; exit 1; }
+          rm -f "$lib"/libssl*.dylib "$lib"/libcrypto*.dylib
+      - env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --locked --target "$TARGET"
+      - name: Package
+        # COPYFILE_DISABLE stops macOS tar from storing extended attributes
+        # (the build output carries com.apple.provenance) as extra entries.
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -eu
+          COPYFILE_DISABLE=1 tar --numeric-owner -czf "br8n-$TARGET.tar.gz" \
+            -C "target/$TARGET/release" br8n
+          shasum -a 256 "br8n-$TARGET.tar.gz" > "br8n-$TARGET.sha256"
+      - name: Smoke-test the packaged binary
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: sh scripts/release-smoke.sh "br8n-$TARGET.tar.gz" "$VERSION"
+      - name: Runtime budget gate (container of at most 8 GB / 4 CPUs)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -eu
+          rm -rf budget-extract
+          mkdir -p budget-extract
+          tar -xzf "br8n-$TARGET.tar.gz" -C budget-extract
+          echo "runner nproc: $(nproc)"
+          free -g
+          CPUS="$(( $(nproc) < 4 ? $(nproc) : 4 ))"
+          TOTAL_MB="$(free -m | awk '/^Mem:/ {print $2}')"
+          MEMORY_MB="$(( TOTAL_MB < 8192 ? TOTAL_MB : 8192 ))"
+          echo "runtime budget container: --cpus=$CPUS --memory=${MEMORY_MB}m"
+          docker run --rm --memory="${MEMORY_MB}m" --cpus="$CPUS" -v "$PWD:/w" -w /w ubuntu:24.04 bash -c '
+            set -eu
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            apt-get install -y -qq python3 libssl3 >/dev/null
+            scripts/runtime-budget.sh budget-extract/br8n 35000 --budget scripts/runtime-budget.json
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: br8n-${{ matrix.target }}
+          path: |
+            br8n-${{ matrix.target }}.tar.gz
+            br8n-${{ matrix.target }}.sha256
+          if-no-files-found: error
+
+  publish:
+    # On a push to main carrying an unreleased version, the whole job runs
+    # and releases. On a push whose version is already released, `build` is
+    # skipped (needs.version.outputs.publish is false), so this job is
+    # skipped too. On a dry run (workflow_dispatch with dry_run true, the
+    # default), every step below runs EXCEPT the two that call the releases
+    # API: download-artifact, the asset assertion, and the changelog
+    # extraction all run regardless, so a workflow change to any of them is
+    # proven before it can affect a real release. The release condition is
+    # POSITIVE in every clause: `inputs` is typed, but a string "true"
+    # compared with `!= true` would coerce to `NaN != 1`, which is TRUE, so a
+    # condition built from negations could release by accident. A condition
+    # where every clause must affirmatively hold cannot. The post-publish
+    # check below reuses those same clauses and adds a leading
+    # `!cancelled()`, a status function rather than a comparison against
+    # `inputs`, so it runs after a failed release step too and cannot fire
+    # when the release condition would not.
+    needs: [version, build]
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: The installer ships beside the binaries
+        run: cp scripts/install.sh dist/install.sh
+      - name: Every asset is present
+        # The exact names are the contract with scripts/install.sh and with
+        # `br8n update` (src/update/mod.rs); this list must change together with
+        # the build matrix and both of them.
+        # The names catch a missing file and the count catches an extra one,
+        # and both run here, before anything is published; the post-publish
+        # step re-counts what actually reached the release.
+        run: |
+          set -eu
+          for t in aarch64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+            for f in "dist/br8n-$t.tar.gz" "dist/br8n-$t.sha256"; do
+              test -f "$f" || { echo "::error::missing $f"; ls -l dist; exit 1; }
+            done
+          done
+          test -f dist/install.sh || { echo "::error::missing dist/install.sh"; exit 1; }
+          n="$(ls dist | wc -l | tr -d ' ')"
+          [ "$n" -eq 7 ] || { echo "::error::expected exactly 7 files in dist, found $n"; ls -l dist; exit 1; }
+      - name: Release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          awk -v v="$VERSION" '/^## /{ if (on) exit; on = ($2 == v) } on' CHANGELOG.md > body.md
+          if [ ! -s body.md ]; then
+            echo "::warning::CHANGELOG.md has no '## $VERSION' section"
+            printf 'br8n %s, built from %s.\n' "$VERSION" "$SHA" > body.md
+          fi
+      - uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main' && needs.version.outputs.publish == 'true' && (github.event_name == 'push' || inputs.dry_run == false)
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          name: v${{ needs.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          body_path: body.md
+          files: dist/*
+          fail_on_unmatched_files: true
+          make_latest: true
+      - name: Every asset reached the release
+        # action-gh-release creates the release before uploading assets, so a
+        # failed upload leaves a published release with fewer than 7 assets
+        # that the gate would then treat as done forever. This step turns
+        # that into a red job, with the recovery command in the message. It
+        # is deliberately non-destructive — it only reads. !cancelled() so it
+        # runs after a failed release step too, which is the case it exists
+        # for.
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.version.outputs.publish == 'true' && (github.event_name == 'push' || inputs.dry_run == false) }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -eu
+          set +e
+          n="$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length' 2>view.err)"
+          rc=$?
+          set -e
+          fix="delete it with: gh release delete v$VERSION --cleanup-tag --yes, then push to main again"
+          if [ "$rc" -ne 0 ]; then
+            if grep -q "release not found" view.err; then
+              echo "::error::no release v$VERSION exists; the release step did not create one, so there is nothing to delete"
+              exit 1
+            fi
+            echo "::error::cannot read release v$VERSION ($(tr '\n' ' ' <view.err)); if it exists with missing assets, $fix"
+            exit 1
+          fi
+          [ "$n" -eq 7 ] || { echo "::error::release v$VERSION has $n assets, expected 7; $fix"; exit 1; }

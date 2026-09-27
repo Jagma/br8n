@@ -1,0 +1,15 @@
+{
+  "name": "br8n",
+  "owner": {
+    "name": "Jagma"
+  },
+  "description": "Local vector-graph RAG over a personal knowledge base, with automatic prompt context injection.",
+  "plugins": [
+    {
+      "name": "br8n",
+      "source": "./",
+      "description": "Local vector-graph RAG over your personal knowledge base, with automatic prompt context injection.",
+      "version": "{{VERSION}}"
+    }
+  ]
+}

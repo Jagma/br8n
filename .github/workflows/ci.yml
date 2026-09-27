@@ -1,0 +1,178 @@
+name: ci
+on:
+  # `push` is restricted to main on purpose. With a bare `[push, pull_request]`
+  # every PR ran the whole matrix TWICE — once for the branch push and once for
+  # the pull_request event — doubling the cost and the wall-clock for nothing.
+  # This way a PR gets one run, and main gets one when the merge lands.
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push while the first run is still going supersedes it. Without this
+# the older run keeps burning a runner to report on a commit nobody is waiting
+# on any more.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Tests never reach the network: no live Ollama server, no live model calls.
+# Anything that would need one is a unit test against a mock or is skipped.
+#
+# No RUSTFLAGS here. An env var overrides .cargo/config.toml entirely, and the
+# committed config now carries the correct per-target flags — including the
+# linker-specific export-dynamic spelling. A previous version of this file set
+# the macOS spelling globally, which GNU ld parses as `-e xport_dynamic` (entry
+# point = nonexistent symbol), so every build script segfaulted on Linux.
+
+# ubuntu-24.04, not 22.04: lbug's prebuilt header includes C++20 <format>,
+# which needs GCC 13's libstdc++. 22.04 ships GCC 11 and fails with
+# "fatal error: format: No such file or directory". macOS never sees this
+# because Apple clang's libc++ has had <format> for years.
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Rerun lbug's build script so its prebuilt library is fetched again
+        run: cargo clean -p lbug
+      - name: Install OpenSSL dev headers
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      # Debug info off, and the reason is disk rather than speed: the runner
+      # has ~14 GB for every test binary plus every rlib, and a full disk
+      # shows up as `collect2: fatal error: ld terminated with signal 7 [Bus
+      # error]` at link time, on whichever target happens to link last.
+      #
+      # The runner also ships ~25 GB of toolchains this repo never builds
+      # against (Android alone is about 9 GB). Removing them buys far more
+      # headroom than any codegen flag can, and it costs seconds. The `df -h /`
+      # on either side is deliberate: the next person to hit this needs the
+      # number, not an assurance.
+      #
+      # If the suite outgrows this too, split the job by test target.
+      # Deleting coverage is not on the list.
+      - name: Free the runner's unused toolchains
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                      /usr/local/share/boost /usr/share/swift \
+                      /opt/hostedtoolcache/CodeQL
+          df -h / | tail -1
+      - run: cargo clippy --all-targets --no-default-features -- -D warnings
+      - run: cargo test --all --timings
+        env:
+          CARGO_PROFILE_TEST_DEBUG: 0
+          CARGO_PROFILE_DEV_DEBUG: 0
+      - name: Enforce the test target count and that every test file is compiled
+        run: python3 scripts/check-test-targets.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cargo-timings
+          path: target/cargo-timings/
+
+  perf:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Rerun lbug's build script so its prebuilt library is fetched again
+        run: cargo clean -p lbug
+      - name: Free the runner's unused toolchains
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                      /usr/local/share/boost /usr/share/swift \
+                      /opt/hostedtoolcache/CodeQL
+          df -h / | tail -1
+      - name: Install OpenSSL dev headers
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+      - name: Check out the merge base and whether it can be compared
+        id: base
+        run: |
+          MERGE_BASE=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
+          echo "perf: merge base is $MERGE_BASE"
+          git worktree add "$RUNNER_TEMP/perf-base" "$MERGE_BASE"
+          if grep -rqs 'fn run_reuse' "$RUNNER_TEMP/perf-base/src/bench"; then
+            echo "comparable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "perf: the merge base has no bench --synthetic --reuse, so there is nothing to compare against; skipping both builds"
+            echo "comparable=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build the PR's binary
+        if: steps.base.outputs.comparable == 'true'
+        run: |
+          cargo build --release
+          cp target/release/br8n "$RUNNER_TEMP/br8n-head"
+      - name: Build the merge base's binary into the shared target directory
+        if: steps.base.outputs.comparable == 'true'
+        working-directory: ${{ runner.temp }}/perf-base
+        run: cargo build --release --target-dir "$GITHUB_WORKSPACE/target"
+      - name: Compare the two binaries
+        if: steps.base.outputs.comparable == 'true'
+        run: scripts/perf-compare.sh "$GITHUB_WORKSPACE/target/release/br8n" "$RUNNER_TEMP/br8n-head"
+
+  msrv:
+    # Cargo.toml declares rust-version = "1.95", and the OCR tree is what
+    # sets it: oar-ocr and its two siblings declare 1.95, reached through
+    # pdf-inspector's `ocr` feature. Building on exactly that toolchain, not
+    # just `stable`, is what actually proves the declared MSRV is real.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95
+      - uses: Swatinem/rust-cache@v2
+      - name: Rerun lbug's build script so its prebuilt library is fetched again
+        run: cargo clean -p lbug
+      - name: Install OpenSSL dev headers
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+      # `check`, not `build`, and the distinction is load-bearing.
+      # This job answers one question: does the toolchain we DECLARE
+      # accept this code? `check` type- and borrow-checks every target,
+      # tests included, which is exactly that question — and it never
+      # links. `build` did link, and the linker is where this job died:
+      # `collect2: fatal error: ld terminated with signal 7 [Bus error]`
+      # on a standard runner, joining ~300 rlibs plus lbug's
+      # whole-archive C++ blob with full debug info. That crash says
+      # nothing about the MSRV; the same tree links fine on a machine
+      # with more memory. Verified: `cargo +1.95 build --all-targets
+      # --locked` succeeds locally in 2m55s, while the runner cannot.
+      - run: cargo check --all-targets --locked
+
+  dashboard:
+    # The SPA's build output is COMMITTED (cargo builds need no node); this
+    # job proves the committed bundle matches the sources so it cannot rot.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: cd dashboard && npm ci && npx tsc --noEmit && npm run build
+      - run: git diff --exit-code dashboard/dist
+
+  e2e:
+    # scripts/ci-local.sh runs the same suite; see dashboard/e2e/run.mjs.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Rerun lbug's build script so its prebuilt library is fetched again
+        run: cargo clean -p lbug
+      - name: Install OpenSSL dev headers
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: scripts/ci-local.sh --only e2e

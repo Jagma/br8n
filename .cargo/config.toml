@@ -1,0 +1,26 @@
+# Linker flags are PER-TARGET because the export-dynamic spelling differs by
+# linker, and getting it wrong is not a warning: GNU ld parses the macOS
+# spelling `-export_dynamic` as `-e xport_dynamic` — "use the symbol
+# `xport_dynamic` as the program entry point". The symbol does not exist, the
+# entry point lands on garbage, and every binary built that way segfaults the
+# moment it runs. CI saw it first in the `proc-macro2`/`quote` build scripts,
+# which are the first binaries cargo executes.
+#
+# The flag itself is required everywhere: without export-dynamic the dlopen'd
+# `vector`/`fts` extensions cannot resolve symbols from the statically linked
+# LadybugDB core, and retrieval silently returns nothing.
+#
+# The `-L` paths point build.rs at Homebrew's OpenSSL on macOS; on Linux the
+# apt-installed dev package is on the default search path and needs no -L.
+
+[target.aarch64-apple-darwin]
+rustflags = ["-L", "/opt/homebrew/opt/openssl@3/lib", "-C", "link-args=-Wl,-export_dynamic"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-L", "/usr/local/opt/openssl@3/lib", "-C", "link-args=-Wl,-export_dynamic"]
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-args=-Wl,--export-dynamic"]
+
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "link-args=-Wl,--export-dynamic"]
