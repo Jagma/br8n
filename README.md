@@ -93,11 +93,13 @@ br8n uninstall            # remove br8n; add --purge to delete its config and in
 
 ## Roadmap
 
-- **Native Windows support** is the headline for 0.2. Until then, use the
-  Linux build inside WSL.
+- **Native Windows support** is the headline for 0.2
+  ([#4](https://github.com/Jagma/br8n/issues/4)). Until then, use the Linux
+  build inside WSL.
 - **More release builds:** Linux on arm64 (Intel Macs are blocked on an
   upstream library issue and need to build from source).
-- **Dashboard fonts bundled** instead of loaded from Google Fonts.
+- **Dashboard fonts bundled** instead of loaded from Google Fonts
+  ([#1](https://github.com/Jagma/br8n/issues/1), a good first issue).
 
 Ideas and bug reports are welcome in the
 [issues](https://github.com/Jagma/br8n/issues); see
