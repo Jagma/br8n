@@ -103,6 +103,10 @@ id comes from its kind and text, so editing either gives it a new id.
 
 ## Dashboard
 
+![The Search tab: what vector, keyword and graph retrieval each found, the fused ranking with the injection gate, and what reached the prompt](images/search.png)
+
+![The knowledge graph of notes, tags and links](images/graph.png)
+
 `br8n dashboard` opens a local web dashboard (127.0.0.1 only): the knowledge
 graph with your notes, links, tags and entities; a search view that shows the
 whole pipeline — what vector, keyword and graph retrieval each found, how

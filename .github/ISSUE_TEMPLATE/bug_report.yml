@@ -1,0 +1,38 @@
+name: Bug report
+description: Something in br8n doesn't work as it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: br8n version
+      description: The output of `br8n --version`
+      placeholder: br8n 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 15 on Apple silicon, Ubuntu 24.04, WSL on Windows 11...
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Which agent?
+      multiple: true
+      options: [Claude Code, Codex, Gemini CLI, Cursor, Claude Desktop, Only the br8n CLI or dashboard]
+  - type: textarea
+    id: status
+    attributes:
+      label: br8n status
+      description: The output of `br8n status`. It contains file paths from your machine, so remove anything you'd rather not share.
+      render: text
