@@ -22,6 +22,17 @@ The workflow takes roughly ten to twenty minutes between the merge and the
 release being published. `br8n update` in that window reports the previous
 release as the latest.
 
+Once the release is published, bring the Homebrew formula up to date in a
+clone of [Jagma/homebrew-tap](https://github.com/Jagma/homebrew-tap), then
+commit and push it there:
+
+```bash
+scripts/homebrew-formula.sh <version> > ../homebrew-tap/Formula/br8n.rb
+```
+
+The script reads each build's checksum from the published release, so it
+fails until the release has both the macOS and the Linux build.
+
 To withdraw a bad release: `gh release delete v<version> --cleanup-tag --yes`,
 then push to `main` again. Without `--cleanup-tag` the tag survives, and the
 gate refuses that version on every push until the tag is gone.

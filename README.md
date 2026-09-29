@@ -54,8 +54,9 @@ curl -fsSL https://github.com/Jagma/br8n/releases/latest/download/install.sh | s
 
 The installer puts `br8n` on your PATH, downloads the embedding model (about
 600 MB, after asking), registers the Claude Code plugin, and offers to connect
-the other agents it finds. Other ways to install, including building from
-source, are in the [install guide](docs/install.md).
+the other agents it finds. With Homebrew, `brew install jagma/tap/br8n` and
+then `br8n install` does the same. Other ways to install, including building
+from source, are in the [install guide](docs/install.md).
 
 ## Get started
 

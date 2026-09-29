@@ -53,6 +53,7 @@ mod retrieve_memory;
 mod retrieve_primitives;
 mod retrieve_profile;
 mod setup_claude;
+mod setup_homebrew;
 mod setup_install;
 mod setup_ollama;
 mod setup_plugin;
