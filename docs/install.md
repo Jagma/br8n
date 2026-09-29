@@ -104,6 +104,15 @@ itself into its own folder.
    ./br8n install
    ```
 
+### Found br8n in Claude Code's plugin menu?
+
+The plugin you install from `/plugin` (or with
+`/plugin marketplace add Jagma/br8n`) needs the `br8n` program, and tells
+you so at the start of each session until the program is installed. Install
+it with one of the options above. `br8n install` then replaces that plugin
+with its own copy, which it keeps in step with the program, so br8n's hooks
+never run twice.
+
 ## Step 2: Answer the installer's questions
 
 `br8n install` does the following:

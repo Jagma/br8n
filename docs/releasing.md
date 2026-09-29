@@ -3,8 +3,10 @@
 
 This is for maintainers.
 
-There is no tag step. Bump `version` in `Cargo.toml`, add a `## <version>`
-section to `CHANGELOG.md`, and merge to `main`. The `release` workflow builds
+There is no tag step. Bump `version` in `Cargo.toml` and in
+`plugin/.claude-plugin/plugin.json` (a test fails while they differ, because
+a plugin installed from a marketplace reads its version from that file), add
+a `## <version>` section to `CHANGELOG.md`, and merge to `main`. The `release` workflow builds
 every target, runs `scripts/release-smoke.sh` against each packaged tarball,
 and publishes `v<version>` with all of them and `install.sh` at once. A push
 to `main` whose version is already released does nothing.

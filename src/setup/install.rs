@@ -294,11 +294,33 @@ fn register(paths: &Paths, cli: &ClaudeCli, r: &mut InstallReport) {
             "plugin:   {PLUGIN_ID} {}",
             if installed { "updated" } else { "installed" }
         )),
-        Err(e) => r.warnings.push(format!(
-            "{e:#}; run by hand: claude plugin {} {PLUGIN_ID}",
-            if installed { "update" } else { "install" }
-        )),
+        Err(e) => {
+            r.warnings.push(format!(
+                "{e:#}; run by hand: claude plugin {} {PLUGIN_ID}",
+                if installed { "update" } else { "install" }
+            ));
+            return;
+        }
     }
+    for other in plugins
+        .iter()
+        .filter(|p| is_br8n(&p.id) && p.id != PLUGIN_ID)
+    {
+        match cli.plugin_uninstall(&other.id) {
+            Ok(()) => r.lines.push(format!(
+                "plugin:   removed {}, which would run br8n's hooks a second time",
+                other.id
+            )),
+            Err(e) => r.warnings.push(format!(
+                "{e:#}; {} runs br8n's hooks a second time, so remove it by hand: claude plugin uninstall {}",
+                other.id, other.id
+            )),
+        }
+    }
+}
+
+fn is_br8n(plugin_id: &str) -> bool {
+    plugin_id.split_once('@').map(|(name, _)| name) == Some("br8n")
 }
 
 pub struct UninstallOpts {
@@ -412,13 +434,16 @@ fn unregister(paths: &Paths, cli: &ClaudeCli, r: &mut UninstallReport) {
         return;
     }
     match cli.plugins() {
-        Ok(p) if p.iter().any(|p| p.id == PLUGIN_ID) => match cli.plugin_uninstall(PLUGIN_ID) {
-            Ok(()) => r.lines.push(format!("unregistered {PLUGIN_ID}")),
-            Err(e) => r.warnings.push(format!(
-                "{e:#}; run by hand: claude plugin uninstall {PLUGIN_ID}"
-            )),
-        },
-        Ok(_) => {}
+        Ok(plugins) => {
+            for id in plugins.iter().map(|p| &p.id).filter(|id| is_br8n(id)) {
+                match cli.plugin_uninstall(id) {
+                    Ok(()) => r.lines.push(format!("unregistered {id}")),
+                    Err(e) => r
+                        .warnings
+                        .push(format!("{e:#}; run by hand: claude plugin uninstall {id}")),
+                }
+            }
+        }
         Err(e) => r.warnings.push(format!("{e:#}")),
     }
     match cli.marketplaces() {
@@ -546,17 +571,27 @@ pub fn install_checks(
                 "no marketplace `br8n` pointing at the plugin directory".into()
             },
         });
-        let plugin_ok = cli
-            .plugins()
-            .map(|p| p.iter().any(|p| p.id == PLUGIN_ID))
-            .unwrap_or(false);
+        let plugins = cli.plugins().unwrap_or_default();
+        let ours = plugins.iter().any(|p| p.id == PLUGIN_ID);
+        let others: Vec<&str> = plugins
+            .iter()
+            .map(|p| p.id.as_str())
+            .filter(|id| is_br8n(id) && *id != PLUGIN_ID)
+            .collect();
         out.push(InstallCheck {
             name: "registration",
-            ok: plugin_ok,
-            detail: if plugin_ok {
-                PLUGIN_ID.into()
-            } else {
-                format!("{PLUGIN_ID} is not installed in Claude Code")
+            ok: ours && others.is_empty(),
+            detail: match (ours, others.is_empty()) {
+                (true, true) => PLUGIN_ID.into(),
+                (true, false) => format!(
+                    "{} is installed as well, so br8n's hooks run twice",
+                    others.join(", ")
+                ),
+                (false, true) => format!("{PLUGIN_ID} is not installed in Claude Code"),
+                (false, false) => format!(
+                    "{} is installed instead of {PLUGIN_ID}, the plugin this binary keeps in step with itself",
+                    others.join(", ")
+                ),
             },
         });
     } else {

@@ -1,0 +1,14 @@
+{
+  "name": "br8n",
+  "owner": {
+    "name": "Jagma"
+  },
+  "description": "Local semantic search over your notes, papers and past agent sessions, injected into your prompts.",
+  "plugins": [
+    {
+      "name": "br8n",
+      "source": "./plugin",
+      "description": "Local semantic search over your notes, papers and past sessions, injected into your prompts when it clears a confidence gate. Needs the br8n program: https://github.com/Jagma/br8n#install"
+    }
+  ]
+}
