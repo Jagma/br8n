@@ -384,3 +384,94 @@ fn a_failed_check_records_the_error_and_keeps_the_previous_latest() {
     assert!(c.error.is_some());
     assert!(c.checked_at > 7);
 }
+
+fn homebrew(fx: &Fx, upgrade_to: Option<&str>) -> Paths {
+    let dir = fx.record.parent().unwrap();
+    let prefix = dir.join("brew");
+    let keg = |v: &str| prefix.join(format!("Cellar/br8n/{v}/bin"));
+    let stub = |v: &str| {
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'br8n {v}'; exit 0; fi\necho \"$*\" >> \"{}\"\n",
+            fx.record.display()
+        )
+    };
+    std::fs::create_dir_all(keg("1.0.0")).unwrap();
+    std::fs::write(keg("1.0.0").join("br8n"), stub("1.0.0")).unwrap();
+    std::fs::set_permissions(
+        keg("1.0.0").join("br8n"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    std::fs::create_dir_all(prefix.join("opt")).unwrap();
+    std::os::unix::fs::symlink("../Cellar/br8n/1.0.0", prefix.join("opt/br8n")).unwrap();
+    let upgrade = match upgrade_to {
+        Some(v) => format!(
+            "mkdir -p \"{keg}\"\ncat > \"{keg}/br8n\" <<'EOS'\n{stub}EOS\nchmod 755 \"{keg}/br8n\"\nln -sfn ../Cellar/br8n/{v} \"{opt}\"\n",
+            keg = keg(v).display(),
+            stub = stub(v),
+            opt = prefix.join("opt/br8n").display()
+        ),
+        None => ":\n".to_string(),
+    };
+    let brew = prefix.join("bin/brew");
+    std::fs::create_dir_all(brew.parent().unwrap()).unwrap();
+    std::fs::write(
+        &brew,
+        format!(
+            "#!/bin/sh\necho \"$*\" >> \"{calls}\"\nif [ \"$*\" = 'upgrade br8n' ]; then\n{upgrade}fi\n",
+            calls = dir.join("brew-calls").display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&brew, std::fs::Permissions::from_mode(0o755)).unwrap();
+    fx.paths.clone().installed_by_homebrew(&prefix)
+}
+
+#[test]
+fn a_homebrew_install_updates_through_brew_then_runs_the_new_install() {
+    let fx = fixture("1.0.0");
+    let api = mirror("2.0.0", assets("2.0.0", &fx.record));
+    let opts = UpdateOpts {
+        paths: homebrew(&fx, Some("2.0.0")),
+        ..opts(&fx, &api, false)
+    };
+    match run(&opts).unwrap() {
+        Outcome::Updated { from, to } => {
+            assert_eq!((from.as_str(), to.as_str()), ("1.0.0", "2.0.0"))
+        }
+        other => panic!("{other:?}"),
+    }
+    let calls = std::fs::read_to_string(fx.record.parent().unwrap().join("brew-calls")).unwrap();
+    assert_eq!(calls, "update\nupgrade br8n\n");
+    assert_eq!(
+        std::fs::read_to_string(&fx.record).unwrap().trim(),
+        "install --yes --quiet",
+        "the new version refreshes the plugin"
+    );
+    assert!(
+        std::fs::read_dir(&fx.paths.tmp)
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true),
+        "Homebrew downloads the release, not br8n"
+    );
+    let s = Status::read(&fx.paths.update_status).unwrap();
+    assert!(s.done && s.ok == Some(true) && s.to.as_deref() == Some("2.0.0"));
+}
+
+#[test]
+fn when_homebrew_has_not_caught_up_with_the_release_the_update_says_so() {
+    let fx = fixture("1.0.0");
+    let api = mirror("2.0.0", assets("2.0.0", &fx.record));
+    let opts = UpdateOpts {
+        paths: homebrew(&fx, None),
+        ..opts(&fx, &api, false)
+    };
+    let err = run(&opts).unwrap_err().to_string();
+    assert!(
+        err.contains("br8n 1.0.0") && err.contains("br8n 2.0.0") && err.contains("try again later"),
+        "{err}"
+    );
+    assert!(!fx.record.exists(), "no install ran");
+    let s = Status::read(&fx.paths.update_status).unwrap();
+    assert!(s.done && s.ok == Some(false));
+}

@@ -104,6 +104,22 @@ itself into its own folder.
    ./br8n install
    ```
 
+### Option D: with Homebrew
+
+On a Mac with Apple silicon, or on Linux with
+[Homebrew](https://brew.sh):
+
+```bash
+brew install jagma/tap/br8n
+br8n install
+```
+
+Homebrew downloads the build for your machine without marking it as
+downloaded from the internet, so a Mac runs it without a warning. `br8n
+install` then sets br8n up as below, except that the program stays where
+Homebrew put it. Run `br8n install` again after `brew upgrade br8n`, so the
+Claude Code plugin matches the new version; `br8n update` does both for you.
+
 ## Step 2: Answer the installer's questions
 
 `br8n install` does the following:
@@ -190,8 +206,9 @@ If something is off, see [Install problems](#install-problems).
 br8n update
 ```
 
-It downloads the newest release, checks it and installs it. The dashboard's
-Health tab has the same button. Restart your agents afterwards. Once a day, a
+It downloads the newest release, checks it and installs it. If you installed
+with Homebrew, it runs `brew update` and `brew upgrade br8n` instead. The
+dashboard's Health tab has the same button. Restart your agents afterwards. Once a day, a
 new Claude Code session checks whether a newer release exists and tells you
 when one does. Nothing installs until you run `br8n update`.
 
@@ -209,6 +226,9 @@ check = false
 br8n uninstall            # removes br8n, its plugin, the PATH link, and its entries in every connected agent
 br8n uninstall --purge    # also removes your br8n config and index
 ```
+
+If you installed with Homebrew, finish with `brew uninstall br8n`: `br8n
+uninstall` leaves the program to Homebrew.
 
 Your notes are never touched. Without `--purge`, the config and the index
 stay so a reinstall picks up where you left off, and the command prints where

@@ -17,6 +17,7 @@ pub struct Paths {
     pub update_status: PathBuf,
     pub link_dirs: Vec<PathBuf>,
     pub claude_cache: PathBuf,
+    pub homebrew: Option<PathBuf>,
 }
 
 impl Paths {
@@ -35,7 +36,11 @@ impl Paths {
         };
         let mut paths = Paths::at(&root, link_dirs, home.join(".claude/plugins/cache/br8n"));
         paths.db = db;
-        paths
+        let exe = std::env::current_exe().and_then(|e| e.canonicalize()).ok();
+        match exe.as_deref().and_then(homebrew_prefix) {
+            Some(prefix) => paths.installed_by_homebrew(&prefix),
+            None => paths,
+        }
     }
 
     pub fn at(root: &Path, link_dirs: Vec<PathBuf>, claude_cache: PathBuf) -> Paths {
@@ -49,6 +54,30 @@ impl Paths {
             update_status: root.join("update.status"),
             link_dirs,
             claude_cache,
+            homebrew: None,
         }
     }
+
+    pub fn installed_by_homebrew(self, prefix: &Path) -> Paths {
+        Paths {
+            bin: prefix.join("opt/br8n/bin/br8n"),
+            homebrew: Some(prefix.to_path_buf()),
+            ..self
+        }
+    }
+}
+
+pub fn homebrew_prefix(exe: &Path) -> Option<PathBuf> {
+    let bin = exe.parent()?;
+    let formula = bin.parent()?.parent()?;
+    let cellar = formula.parent()?;
+    let named = |p: &Path, name: &str| p.file_name().is_some_and(|n| n == name);
+    let in_a_keg = named(exe, "br8n")
+        && named(bin, "bin")
+        && named(formula, "br8n")
+        && named(cellar, "Cellar");
+    in_a_keg
+        .then(|| cellar.parent())
+        .flatten()
+        .map(Path::to_path_buf)
 }

@@ -240,6 +240,9 @@ fn run_phases(opts: &UpdateOpts, phase: &mut Phase<'_>) -> Result<Outcome> {
         phase.finish(true, format!("{latest} is available"));
         return Ok(Outcome::CheckOnly(record));
     }
+    if let Some(prefix) = &paths.homebrew {
+        return upgrade_with_homebrew(prefix, &latest, opts, phase);
+    }
 
     let release = release::fetch_latest(&opts.api, opts.token.as_deref(), &agent)?;
     let tgz_name = format!("br8n-{}.tar.gz", opts.target);
@@ -292,6 +295,52 @@ fn run_phases(opts: &UpdateOpts, phase: &mut Phase<'_>) -> Result<Outcome> {
     Ok(Outcome::Updated {
         from: opts.installed.clone(),
         to: latest,
+    })
+}
+
+fn upgrade_with_homebrew(
+    prefix: &Path,
+    latest: &str,
+    opts: &UpdateOpts,
+    phase: &mut Phase<'_>,
+) -> Result<Outcome> {
+    let brew = prefix.join("bin/brew");
+    for args in [["update"].as_slice(), ["upgrade", "br8n"].as_slice()] {
+        let shown = format!("brew {}", args.join(" "));
+        phase.set("upgrading", shown.clone());
+        let status = std::process::Command::new(&brew)
+            .args(args)
+            .status()
+            .with_context(|| format!("run {}", brew.display()))?;
+        if !status.success() {
+            bail!("`{shown}` exited {status}");
+        }
+    }
+
+    let bin = &opts.paths.bin;
+    let out = std::process::Command::new(bin)
+        .arg("--version")
+        .output()
+        .with_context(|| format!("run {} --version", bin.display()))?;
+    let got = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let want = format!("br8n {latest}");
+    if got != want {
+        bail!("Homebrew now has `{got}`, not `{want}`: its br8n formula has not caught up with the release yet, so try again later");
+    }
+
+    phase.set("installing", format!("{} install", bin.display()));
+    let status = std::process::Command::new(bin)
+        .args(["install", "--yes", "--quiet"])
+        .status()
+        .with_context(|| format!("run {} install", bin.display()))?;
+    if !status.success() {
+        bail!("`{} install` exited {status}", bin.display());
+    }
+
+    phase.finish(true, format!("updated {} -> {latest}", opts.installed));
+    Ok(Outcome::Updated {
+        from: opts.installed.clone(),
+        to: latest.to_string(),
     })
 }
 

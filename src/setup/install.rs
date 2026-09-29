@@ -64,26 +64,14 @@ pub fn install(paths: &Paths, opts: &InstallOpts) -> Result<InstallReport> {
         paths.plugin.display()
     ));
 
-    match link_binary(paths) {
-        Ok(Some(link)) => {
-            r.lines.push(format!("link:     {}", link.display()));
-            if let Some(hint) = path_hint(&link) {
-                r.warnings.push(hint);
-            }
-        }
-        Ok(None) => r.warnings.push(format!(
-            "no directory to link `br8n` into ({}); add {} to PATH yourself",
-            paths
-                .link_dirs
-                .iter()
-                .map(|d| d.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", "),
-            paths.bin.parent().unwrap_or(&paths.root).display()
-        )),
-        Err(e) => r
-            .warnings
-            .push(format!("could not link `br8n` onto PATH: {e:#}")),
+    if let Some(prefix) = &paths.homebrew {
+        retire_self_installed_binary(paths, &mut r);
+        r.lines.push(format!(
+            "link:     Homebrew puts br8n on PATH from {}",
+            prefix.join("bin").display()
+        ));
+    } else {
+        link_onto_path(paths, &mut r);
     }
 
     if opts.config_path.is_file() {
@@ -126,6 +114,60 @@ pub fn install(paths: &Paths, opts: &InstallOpts) -> Result<InstallReport> {
         opts.version
     ));
     Ok(r)
+}
+
+fn link_onto_path(paths: &Paths, r: &mut InstallReport) {
+    match link_binary(paths) {
+        Ok(Some(link)) => {
+            r.lines.push(format!("link:     {}", link.display()));
+            if let Some(hint) = path_hint(&link) {
+                r.warnings.push(hint);
+            }
+        }
+        Ok(None) => r.warnings.push(format!(
+            "no directory to link `br8n` into ({}); add {} to PATH yourself",
+            paths
+                .link_dirs
+                .iter()
+                .map(|d| d.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+            paths.bin.parent().unwrap_or(&paths.root).display()
+        )),
+        Err(e) => r
+            .warnings
+            .push(format!("could not link `br8n` onto PATH: {e:#}")),
+    }
+}
+
+fn retire_self_installed_binary(paths: &Paths, r: &mut InstallReport) {
+    let own = paths.root.join("bin/br8n");
+    for dir in &paths.link_dirs {
+        let link = dir.join("br8n");
+        if std::fs::read_link(&link).is_ok_and(|target| target == own)
+            && std::fs::remove_file(&link).is_ok()
+        {
+            r.lines
+                .push(format!("link:     removed {}", link.display()));
+        }
+    }
+    if !own.is_file() {
+        return;
+    }
+    match std::fs::remove_file(&own) {
+        Ok(()) => {
+            r.lines.push(format!(
+                "binary:   removed {}, the copy from before Homebrew installed br8n",
+                own.display()
+            ));
+            if let Some(dir) = own.parent() {
+                let _ = std::fs::remove_dir(dir);
+            }
+        }
+        Err(e) => r
+            .warnings
+            .push(format!("could not remove {}: {e}", own.display())),
+    }
 }
 
 pub fn place_binary(paths: &Paths, exe: &Path) -> Result<bool> {
@@ -354,6 +396,13 @@ pub fn uninstall(paths: &Paths, opts: &UninstallOpts) -> Result<UninstallReport>
         }
     }
 
+    if paths.homebrew.is_some() {
+        r.warnings.push(
+            "Homebrew installed the br8n program itself; finish with `brew uninstall br8n`"
+                .to_string(),
+        );
+    }
+
     if opts.purge {
         std::fs::remove_dir_all(&paths.root)
             .with_context(|| format!("remove {}", paths.root.display()))?;
@@ -378,11 +427,14 @@ pub fn uninstall(paths: &Paths, opts: &UninstallOpts) -> Result<UninstallReport>
         return Ok(r);
     }
 
-    for p in [
-        paths.bin.parent().unwrap_or(&paths.root).to_path_buf(),
-        paths.plugin.clone(),
-        paths.tmp.clone(),
-    ] {
+    let own_bin_dir = paths
+        .homebrew
+        .is_none()
+        .then(|| paths.bin.parent().unwrap_or(&paths.root).to_path_buf());
+    for p in own_bin_dir
+        .into_iter()
+        .chain([paths.plugin.clone(), paths.tmp.clone()])
+    {
         if p.exists() {
             match std::fs::remove_dir_all(&p) {
                 Ok(()) => r.lines.push(format!("removed {}", p.display())),
