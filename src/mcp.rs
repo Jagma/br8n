@@ -262,6 +262,14 @@ impl Br8nTools {
     }
 
     #[tool(
+        title = "Search the knowledge base",
+        annotations(
+            title = "Search the knowledge base",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
         description = "Search the user's personal knowledge base (notes, papers, saved \
                        articles, past Claude Code sessions) by meaning. Use this when the \
                        user refers to something they have written down, read, or worked on \
@@ -289,6 +297,14 @@ impl Br8nTools {
     }
 
     #[tool(
+        title = "Find connected notes",
+        annotations(
+            title = "Find connected notes",
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
         description = "Given the uri of a note already found, return notes connected to it \
                        in the knowledge graph — wikilinks and adjacent sections. Use this to \
                        follow a thread after br8n_search finds a starting point."
@@ -310,7 +326,17 @@ impl Br8nTools {
         )]))
     }
 
-    #[tool(description = "Re-index the knowledge base, picking up new and changed files.")]
+    #[tool(
+        title = "Re-index the knowledge base",
+        annotations(
+            title = "Re-index the knowledge base",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
+        description = "Re-index the knowledge base, picking up new and changed files."
+    )]
     async fn br8n_index(&self) -> Result<CallToolResult, ErrorData> {
         // See br8n_search: blocking store/HTTP calls must run off the async
         // worker threads.
@@ -328,6 +354,14 @@ impl Br8nTools {
     }
 
     #[tool(
+        title = "Save a memory",
+        annotations(
+            title = "Save a memory",
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        ),
         description = "Save a memory for future sessions: a lesson the user taught you (a correction or rule), \
                        a durable fact about the user or their setup, or an episode (what happened and what was \
                        decided). Lessons are shown to you at the start of every session in the matching project; \
@@ -360,6 +394,14 @@ impl Br8nTools {
     }
 
     #[tool(
+        title = "Forget a memory",
+        annotations(
+            title = "Forget a memory",
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = false
+        ),
         description = "Delete a memory by id, when the user says a lesson or fact no longer applies."
     )]
     async fn br8n_forget(
@@ -383,7 +425,11 @@ impl ServerHandler for Br8nTools {
     fn get_info(&self) -> ServerInfo {
         // ServerInfo (= InitializeResult) is #[non_exhaustive]: a struct literal
         // will not compile. Build with `new`, then set the optional fields.
-        let mut info = ServerInfo::new(ServerCapabilities::builder().enable_tools().build());
+        let mut info = ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(
+                Implementation::new("br8n", env!("CARGO_PKG_VERSION"))
+                    .with_website_url("https://github.com/Jagma/br8n"),
+            );
         info.instructions = Some(
             "Semantic search over the user's personal knowledge base, plus durable memory: \
              br8n_remember saves lessons, facts and episodes; br8n_forget retracts one."
