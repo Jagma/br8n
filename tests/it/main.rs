@@ -42,6 +42,7 @@ mod mcp;
 mod memory;
 mod memory_distill;
 mod pack;
+mod plugin_launcher;
 mod plugin_manifest;
 mod probe_chunk;
 mod probe_insert;

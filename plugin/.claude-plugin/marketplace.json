@@ -8,8 +8,7 @@
     {
       "name": "br8n",
       "source": "./",
-      "description": "Local vector-graph RAG over your personal knowledge base, with automatic prompt context injection.",
-      "version": "{{VERSION}}"
+      "description": "Local vector-graph RAG over your personal knowledge base, with automatic prompt context injection."
     }
   ]
 }

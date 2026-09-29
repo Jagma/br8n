@@ -5,17 +5,18 @@ use std::path::Path;
 #[folder = "plugin/"]
 struct Templates;
 
-const VERSION: &str = "{{VERSION}}";
-const BIN: &str = "{{BR8N_BIN}}";
+const LAUNCHER: &str = "${CLAUDE_PLUGIN_ROOT}/scripts/br8n.sh";
+const SHIPPED_VERSION: &str = concat!("\"version\": \"", env!("CARGO_PKG_VERSION"), "\"");
 
 pub fn render(version: &str, bin: &Path) -> Vec<(String, Vec<u8>)> {
     let bin = bin.to_string_lossy();
+    let stamped = format!("\"version\": \"{version}\"");
     Templates::iter()
         .map(|name| {
             let data = Templates::get(&name).expect("iterated name exists").data;
             let text = String::from_utf8_lossy(&data)
-                .replace(VERSION, version)
-                .replace(BIN, &bin);
+                .replace(SHIPPED_VERSION, &stamped)
+                .replace(LAUNCHER, &bin);
             (name.to_string(), text.into_bytes())
         })
         .collect()

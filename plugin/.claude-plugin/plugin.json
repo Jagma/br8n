@@ -1,10 +1,18 @@
 {
   "name": "br8n",
-  "description": "Semantic search over your personal knowledge base — notes, papers, clippings, and past sessions — with automatic context injection.",
-  "version": "{{VERSION}}",
+  "description": "Semantic search over your personal knowledge base — notes, papers, clippings, and past sessions — with automatic context injection. Needs the br8n program, installed separately.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Jagma",
+    "url": "https://github.com/Jagma"
+  },
+  "homepage": "https://github.com/Jagma/br8n",
+  "repository": "https://github.com/Jagma/br8n",
+  "license": "AGPL-3.0-only",
+  "keywords": ["search", "memory", "rag", "notes", "knowledge-base", "local-first", "mcp"],
   "mcpServers": {
     "br8n": {
-      "command": "{{BR8N_BIN}}",
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/br8n.sh",
       "args": [
         "mcp"
       ]

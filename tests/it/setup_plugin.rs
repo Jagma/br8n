@@ -33,12 +33,16 @@ fn every_embedded_file_is_rendered_and_no_placeholder_survives() {
         "commands/br8n-memories.md",
         "skills/br8n-retrieval/SKILL.md",
         "skills/br8n-memory/SKILL.md",
+        "scripts/br8n.sh",
     ] {
         assert!(names.contains(&want), "missing {want} in {names:?}");
     }
     for (p, bytes) in &files {
         let s = String::from_utf8_lossy(bytes);
-        assert!(!s.contains("{{"), "{p} still carries a placeholder");
+        assert!(
+            !s.contains("scripts/br8n.sh"),
+            "{p} still runs the launcher instead of the installed binary"
+        );
     }
 }
 
@@ -51,9 +55,6 @@ fn the_version_and_the_binary_path_are_substituted() {
         plugin["mcpServers"]["br8n"]["command"],
         "/Users/x/Library/Application Support/br8n/bin/br8n"
     );
-    let market: serde_json::Value =
-        serde_json::from_str(&rendered(".claude-plugin/marketplace.json")).unwrap();
-    assert_eq!(market["plugins"][0]["version"], "9.8.7");
 }
 
 #[test]

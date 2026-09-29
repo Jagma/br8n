@@ -231,3 +231,43 @@ fn a_marketplace_pointing_elsewhere_fails_only_the_marketplace_check() {
     let registration = checks.iter().find(|c| c.name == "registration").unwrap();
     assert!(registration.ok, "{}", registration.detail);
 }
+
+#[test]
+fn a_second_br8n_plugin_fails_registration_because_the_hooks_would_run_twice() {
+    let t = tempfile::tempdir().unwrap();
+    let (paths, cli) = healthy_install(t.path());
+    let version = env!("CARGO_PKG_VERSION");
+    std::fs::write(
+        t.path().join("plugins.json"),
+        format!(
+            "[{{\"id\":\"br8n@br8n\",\"version\":\"{version}\"}},{{\"id\":\"br8n@claude-community\",\"version\":\"{version}\"}}]"
+        ),
+    )
+    .unwrap();
+    let checks = checks_with_path(&paths, &cli, &t.path().join("link"));
+    let registration = checks.iter().find(|c| c.name == "registration").unwrap();
+    assert!(!registration.ok);
+    assert!(
+        registration
+            .detail
+            .contains("br8n@claude-community is installed as well"),
+        "{}",
+        registration.detail
+    );
+
+    std::fs::write(
+        t.path().join("plugins.json"),
+        format!("[{{\"id\":\"br8n@claude-community\",\"version\":\"{version}\"}}]"),
+    )
+    .unwrap();
+    let checks = checks_with_path(&paths, &cli, &t.path().join("link"));
+    let registration = checks.iter().find(|c| c.name == "registration").unwrap();
+    assert!(!registration.ok);
+    assert!(
+        registration
+            .detail
+            .contains("installed instead of br8n@br8n"),
+        "{}",
+        registration.detail
+    );
+}

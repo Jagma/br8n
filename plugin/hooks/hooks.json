@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"{{BR8N_BIN}}\" hook prompt",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/br8n.sh\" hook prompt",
             "timeout": 5
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"{{BR8N_BIN}}\" hook session-start",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/br8n.sh\" hook session-start",
             "timeout": 10
           }
         ]

@@ -218,6 +218,70 @@ fn a_marketplace_named_br8n_pointing_elsewhere_is_repointed() {
 }
 
 #[test]
+fn a_br8n_plugin_from_another_marketplace_gives_way_to_the_installed_one() {
+    let fx = fixture("1.2.3");
+    std::fs::write(
+        fx.stubdir.join("plugins.json"),
+        r#"[{"id":"br8n@claude-community","version":"1.2.0"},{"id":"br8n-extras@elsewhere","version":"1.0.0"}]"#,
+    )
+    .unwrap();
+    let report = install(&fx.paths, &fx.opts).unwrap();
+    let c = calls(&fx.stubdir);
+    let ours = c
+        .iter()
+        .position(|l| l == "plugin install br8n@br8n")
+        .expect("install");
+    let theirs = c
+        .iter()
+        .position(|l| l == "plugin uninstall br8n@claude-community")
+        .expect("uninstall");
+    assert!(
+        ours < theirs,
+        "never leave Claude Code without the plugin: {c:?}"
+    );
+    assert!(
+        !c.iter().any(|l| l.contains("br8n-extras")),
+        "a plugin that only shares the prefix is not br8n's: {c:?}"
+    );
+    assert!(
+        report
+            .lines
+            .iter()
+            .any(|l| l.contains("removed br8n@claude-community")),
+        "{:?}",
+        report.lines
+    );
+}
+
+#[test]
+fn when_the_plugin_cannot_be_installed_the_other_br8n_plugin_stays() {
+    let fx = fixture("1.2.3");
+    std::fs::write(
+        fx.stubdir.join("plugins.json"),
+        r#"[{"id":"br8n@claude-community","version":"1.2.0"}]"#,
+    )
+    .unwrap();
+    let claude = fx.stubdir.join("claude");
+    let body = std::fs::read_to_string(&claude).unwrap().replace(
+        "*) exit 0 ;;",
+        "'plugin install br8n@br8n') exit 1 ;;\n*) exit 0 ;;",
+    );
+    executable(&claude, &body);
+    let report = install(&fx.paths, &fx.opts).unwrap();
+    assert!(!calls(&fx.stubdir)
+        .iter()
+        .any(|l| l.starts_with("plugin uninstall")));
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.contains("claude plugin install br8n@br8n")),
+        "{:?}",
+        report.warnings
+    );
+}
+
+#[test]
 fn a_placed_binary_that_reports_the_wrong_version_is_a_hard_failure() {
     let fx = fixture("0.0.9");
     let err = install(&fx.paths, &fx.opts).unwrap_err().to_string();
@@ -311,6 +375,29 @@ fn uninstall_removes_what_install_made_and_keeps_the_data() {
             "plugin marketplace remove br8n"
         ]
     );
+}
+
+#[test]
+fn uninstall_removes_the_br8n_plugin_whichever_marketplace_it_came_from() {
+    let fx = installed_fixture();
+    std::fs::write(
+        fx.stubdir.join("plugins.json"),
+        r#"[{"id":"br8n@br8n","version":"1.2.3"},{"id":"br8n@claude-community","version":"1.2.0"}]"#,
+    )
+    .unwrap();
+    let report = uninstall(&fx.paths, &unopts(&fx, false)).unwrap();
+    let c = calls(&fx.stubdir);
+    for id in ["br8n@br8n", "br8n@claude-community"] {
+        assert!(
+            c.contains(&format!("plugin uninstall {id}")),
+            "{id} left behind: {c:?}"
+        );
+        assert!(
+            report.lines.contains(&format!("unregistered {id}")),
+            "{:?}",
+            report.lines
+        );
+    }
 }
 
 #[test]
