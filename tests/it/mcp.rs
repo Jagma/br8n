@@ -122,3 +122,76 @@ fn a_non_refusal_search_failure_still_answers_no_results() {
          got: {text:?}"
     );
 }
+
+fn handshake(dir: &std::path::Path) -> std::collections::HashMap<u64, serde_json::Value> {
+    use std::io::{BufRead, Write};
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_br8n"))
+        .arg("mcp")
+        .env("BR8N_DB", dir.join("db"))
+        .env("BR8N_CONFIG", dir.join("config.toml"))
+        .env("PATH", "/usr/bin:/bin")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    for request in [
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}"#,
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+    ] {
+        writeln!(stdin, "{request}").unwrap();
+    }
+    let stdout = child.stdout.take().unwrap();
+    let (lines, received) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(stdout)
+            .lines()
+            .map_while(Result::ok)
+        {
+            if lines.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let mut answers = std::collections::HashMap::new();
+    while !answers.contains_key(&2) {
+        let Ok(line) = received.recv_timeout(std::time::Duration::from_secs(30)) else {
+            break;
+        };
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        if let Some(id) = v["id"].as_u64() {
+            answers.insert(id, v);
+        }
+    }
+    drop(stdin);
+    let _ = child.kill();
+    let _ = child.wait();
+    answers
+}
+
+#[test]
+fn the_server_names_itself_and_annotates_every_tool() {
+    let t = tempfile::tempdir().unwrap();
+    let answers = handshake(t.path());
+    let server = &answers[&1]["result"]["serverInfo"];
+    assert_eq!(server["name"], "br8n", "{server}");
+    assert_eq!(server["version"], env!("CARGO_PKG_VERSION"), "{server}");
+
+    let tools = answers[&2]["result"]["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 5, "{tools:?}");
+    for tool in tools {
+        let a = &tool["annotations"];
+        assert!(a["title"].as_str().is_some_and(|t| !t.is_empty()), "{tool}");
+        assert_eq!(tool["title"], a["title"], "{tool}");
+        assert!(
+            a["readOnlyHint"].is_boolean() && a["destructiveHint"].is_boolean(),
+            "{tool}"
+        );
+        let name = tool["name"].as_str().unwrap();
+        let reads_only = matches!(name, "br8n_search" | "br8n_related");
+        assert_eq!(a["readOnlyHint"], reads_only, "{name}");
+        assert_eq!(a["destructiveHint"], name == "br8n_forget", "{name}");
+    }
+}
