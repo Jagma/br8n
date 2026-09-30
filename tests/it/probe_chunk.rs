@@ -1,6 +1,7 @@
 use br8n::chunk::Chunker;
 use br8n::model::{Document, SourceType};
 
+#[ignore = "manual timing probe"]
 #[test]
 fn probe_real_sizes() {
     let para = "## Heading\n\nretrieval pipeline vector store embedding query rerank chunk graph fusion latency and more words here\n\n";

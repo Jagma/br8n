@@ -1,6 +1,7 @@
 use br8n::model::{Chunk, Document, SourceType};
 use br8n::store::Store;
 
+#[ignore = "manual timing probe"]
 #[test]
 fn probe_insert_scaling() {
     let dir = tempfile::tempdir().unwrap();
