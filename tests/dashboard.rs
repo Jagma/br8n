@@ -1578,3 +1578,67 @@ fn a_machine_that_never_indexed_reads_as_empty_and_a_swap_window_still_as_busy()
         swapping.1
     );
 }
+
+fn get_content_type(addr: std::net::SocketAddr, path: &str) -> (u16, Option<String>) {
+    let mut s = std::net::TcpStream::connect(addr).unwrap();
+    write!(
+        s,
+        "GET {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    let mut buf = Vec::new();
+    let mut byte = [0u8; 1];
+    while s.read_exact(&mut byte).is_ok() {
+        buf.push(byte[0]);
+        if buf.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+    let header_part = String::from_utf8_lossy(&buf);
+    let status: u16 = header_part
+        .split_whitespace()
+        .nth(1)
+        .unwrap()
+        .parse()
+        .unwrap();
+    let mut content_type = None;
+    for line in header_part.lines() {
+        if let Some(val) = line.strip_prefix("Content-Type: ") {
+            content_type = Some(val.trim().to_string());
+            break;
+        }
+    }
+    (status, content_type)
+}
+
+#[test]
+fn static_assets_serve_accurate_content_types() {
+    let _g = ENV_GUARD.lock().unwrap();
+    let addr = server_over_temp_corpus();
+
+    let (status, ctype) = get_content_type(addr, "/fonts/IBM-Plex-sans-OFL.txt");
+    assert_eq!(status, 200);
+    assert_eq!(ctype.as_deref(), Some("text/plain; charset=utf-8"));
+
+    let (status, ctype) = get_content_type(
+        addr,
+        "/assets/ibm-plex-mono-latin-400-normal-DMJ8VG8y.woff2",
+    );
+    assert_eq!(status, 200);
+    assert_eq!(ctype.as_deref(), Some("font/woff2"));
+
+    let (status, ctype) = get_content_type(
+        addr,
+        "/assets/ibm-plex-mono-latin-ext-500-normal-CZ70TYgx.woff",
+    );
+    assert_eq!(status, 200);
+    assert_eq!(ctype.as_deref(), Some("font/woff"));
+
+    let (status, ctype) = get_content_type(addr, "/");
+    assert_eq!(status, 200);
+    assert_eq!(ctype.as_deref(), Some("text/html"));
+
+    let (status, ctype) = get_content_type(addr, "/settings");
+    assert_eq!(status, 200);
+    assert_eq!(ctype.as_deref(), Some("text/html"));
+}

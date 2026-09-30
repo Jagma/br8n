@@ -23,7 +23,7 @@ Nothing leaves your machine: no cloud embedding API and no telemetry. br8n
 itself goes online only to check daily for a newer release, to fetch the OCR
 model the first time it reads a scanned PDF, to fetch pages you add with
 `br8n add <url>`, and, if you turn it on, to back up to your own S3 bucket or
-Google Drive. The dashboard also loads its web fonts from Google Fonts.
+Google Drive.
 
 ## Why br8n?
 

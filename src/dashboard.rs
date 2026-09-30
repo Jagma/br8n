@@ -298,17 +298,27 @@ fn handle(mut stream: TcpStream, source: &ConfigSource, agents: Option<&AgentEnv
             let _ = query;
             // The SPA owns routing: any non-API path gets the shell.
             let asset = path.trim_start_matches('/');
-            let file = Assets::get(asset)
-                .or_else(|| Assets::get("index.html"))
-                .expect("index.html is embedded");
-            let ctype = match asset.rsplit('.').next() {
-                Some("js") => "text/javascript",
-                Some("css") => "text/css",
-                Some("svg") => "image/svg+xml",
-                _ => "text/html",
+            let (file, ctype) = match Assets::get(asset) {
+                Some(file) => (file, content_type_for(asset)),
+                None => (
+                    Assets::get("index.html").expect("index.html is embedded"),
+                    "text/html",
+                ),
             };
             respond(&mut stream, "200 OK", ctype, &file.data);
         }
+    }
+}
+
+fn content_type_for(path: &str) -> &'static str {
+    match path.rsplit('.').next() {
+        Some("js") => "text/javascript",
+        Some("css") => "text/css",
+        Some("svg") => "image/svg+xml",
+        Some("woff2") => "font/woff2",
+        Some("woff") => "font/woff",
+        Some("txt") => "text/plain; charset=utf-8",
+        _ => "text/html",
     }
 }
 
@@ -1401,5 +1411,19 @@ mod tests {
         // The panicking byte offset sits one further in when there is a
         // normal percent-escape ahead of it too.
         assert_eq!(super::url_decode("a%20%€b"), "a %€b");
+    }
+    #[test]
+    fn static_content_types_map_extensions_accurately() {
+        assert_eq!(super::content_type_for("bundle.js"), "text/javascript");
+        assert_eq!(super::content_type_for("style.css"), "text/css");
+        assert_eq!(super::content_type_for("icon.svg"), "image/svg+xml");
+        assert_eq!(super::content_type_for("font.woff2"), "font/woff2");
+        assert_eq!(super::content_type_for("font.woff"), "font/woff");
+        assert_eq!(
+            super::content_type_for("license.txt"),
+            "text/plain; charset=utf-8"
+        );
+        assert_eq!(super::content_type_for("index.html"), "text/html");
+        assert_eq!(super::content_type_for("settings"), "text/html");
     }
 }
