@@ -66,6 +66,11 @@ detached child by construction and flaked once in four runs under `it`'s
 parallelism. A new test file goes in `tests/it/` with a `mod` line unless it
 touches process-global state.
 
+The timing probes `probe_real_sizes` and `probe_insert_scaling` are ignored by
+default. Run them on demand with:
+
+    cargo test --test it -- --ignored probe
+
 With `autotests = false` a file cargo is not told about is never compiled, and
 its tests "pass" by not existing. The CI step "Enforce the test target count
 and that every test file is compiled" therefore fails on any `tests/*.rs` that
